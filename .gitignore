@@ -1,0 +1,7 @@
+data.zip
+
+# Ignore the entire data folder EXCEPT the empty placeholder file
+data/*
+!data/.gitkeep
+__pycache__/*
+*.pyc
