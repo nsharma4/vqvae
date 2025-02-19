@@ -2,7 +2,8 @@ import torch
 import numpy as np
 import scipy.io
 from torch.utils.data import DataLoader, TensorDataset
-from vqvae import VQVAE 
+from vqvae import VQVAE
+import time
 
 # Load the trained model
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -11,35 +12,52 @@ model.load_state_dict(torch.load("vqvae_model.pth"))  # Load trained weights
 model.eval()  # Set model to evaluation mode
 
 # Function to load test data
-def load_data(filepath):
+def load_data(filepath, num_samples=None):
     mat = scipy.io.loadmat(filepath)
     data = mat['HT'].astype('float32')
 
-    print(f"Loaded test data shape: {data.shape}")  # Debugging
+    print(f"Loaded test data shape from {filepath}: {data.shape}")  # Debugging
 
-    # Normalize and reshape from (batch, 1, 2048) → (batch, 2, 32, 32)
+    # If `num_samples` is provided, use only a subset of the data
+    if num_samples is not None:
+        data = data[:num_samples]
+
+    # Normalize and reshape from (batch, 2048) → (batch, 2, 32, 32)
     data = data - 0.5
     data = np.reshape(data, (data.shape[0], 2, 32, 32))
 
+    print(f"Final reshaped test data shape: {data.shape}")  # Debugging
     return data
 
 # Load test dataset
-test_data = load_data("data/DATA_Htestin.mat")
+test_subset_size = 2000  # Modify if needed
+test_data = load_data("data/DATA_Htestin.mat", test_subset_size)
 
 # Convert to PyTorch tensors
 test_tensor = torch.tensor(test_data, dtype=torch.float32)
-test_loader = DataLoader(TensorDataset(test_tensor), batch_size=256)  # Faster evaluation
+test_loader = DataLoader(TensorDataset(test_tensor), batch_size=64)
 
+# Open a log file
+log_filename = "vqvae_test_log.txt"
+with open(log_filename, "w") as log_file:
+    log_file.write("VQ-VAE Testing Log\n")
+    log_file.write(f"Start Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+    log_file.write("=== Testing Parameters ===\n")
+    log_file.write(f"Batch Size: {64}\n")
+    log_file.write(f"Test Subset Size: {test_subset_size}\n\n")
+    log_file.write("=== Evaluation Metrics ===\n")
+    log_file.write(f"{'NMSE (dB)':<15} {'Correlation (rho)'}\n")
+    log_file.write("="*40 + "\n")
 
 # Initialize lists for storing results
 reconstructed_data = []
 original_data = []
 
 # Run inference on test data
-with torch.no_grad():  # No gradients needed for testing
+with torch.no_grad(): 
     for batch in test_loader:
         data = batch[0].to(device)
-        
+
         # Reconstruct the input data using VQ-VAE
         reconstructed, _ = model(data)
 
@@ -65,9 +83,12 @@ rho = np.mean(num / den)
 print(f"NMSE: {nmse:.4f} dB")
 print(f"Correlation: {rho:.4f}")
 
-# Save results as .mat file
-scipy.io.savemat("vqvae_reconstructed.mat", {"reconstructed": reconstructed_data})
-scipy.io.savemat("vqvae_original.mat", {"original": original_data})
+# Append evaluation results to log file
+with open(log_filename, "a") as log_file:
+    log_file.write(f"{nmse:<15.4f} {rho:.4f}\n")
+    log_file.write("="*40 + "\n")
+    log_file.write("Testing Complete!\n")
+    log_file.write(f"End Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
 
 # Plot some test examples
 import matplotlib.pyplot as plt
@@ -88,4 +109,10 @@ for i in range(n):
     plt.title("Reconstructed CSI")
     plt.axis("off")
 
+# Save the figure as a PNG file
+plot_filename = "vqvae_reconstruction_test_examples.png"
+plt.savefig(plot_filename, dpi=300, bbox_inches="tight")
+print(f"Saved reconstruction plot as {plot_filename}")
+
+# Display the plot
 plt.show()
