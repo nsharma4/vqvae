@@ -27,6 +27,7 @@ class VectorQuantizer(nn.Module):
         quantized = x + (quantized - x).detach()
         return quantized, loss
 
+# default parameters, input dimension = 2, hidden dimension = 128, number of embeddings = 512, embedding dimension = 64
 class VQVAE(nn.Module):
     def __init__(self, input_dim=2, hidden_dim=128, num_embeddings=512, embedding_dim=64):
         super(VQVAE, self).__init__()
