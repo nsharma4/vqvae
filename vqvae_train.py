@@ -47,6 +47,7 @@ val_loader = DataLoader(TensorDataset(val_tensor), batch_size=batch_size)
 
 # Set up the model and optimizer
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
 model = VQVAE(input_dim=2).to(device)
 #Optimizer is important because it determine VQ loss
 learning_rate = 1e-3
