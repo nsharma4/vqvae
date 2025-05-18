@@ -1,6 +1,25 @@
 VQ-VAE Training Log
-Start Time: 2025-02-27 20:04:06
+Start Time: 2025-04-16 15:48:54
 
 === Training Parameters ===
-Learning Rate: 0.001
+Learning Rate: 0.0002
 Batch Size: 256
+Train Size: 5000
+Validation Size: 1000
+=== Training Progress ===
+Epoch      Recon Loss      VQ Loss         Val Loss
+==================================================
+1          0.2338          0.0576          0.2159
+2          0.1870          0.6035          0.1444
+3          0.0922          2.3728          0.0397
+4          0.0181          4.5442          0.0057
+5          0.0032          3.3552          0.0017
+6          0.0013          1.4901          0.0010
+7          0.0009          0.5827          0.0007
+8          0.0007          0.2185          0.0006
+9          0.0006          0.0787          0.0005
+10         0.0005          0.0270          0.0005
+==================================================
+Training Complete!
+Best Validation Loss: 0.0005
+End Time: 2025-04-16 15:52:49
