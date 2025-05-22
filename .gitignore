@@ -7,3 +7,7 @@ __pycache__/*
 forked-sydney222-csinet/
 *.txt
 !requirements.txt
+*.pdf
+unused_data/*
+unused_forked-sydney222-csinet/*
+models_*/*

@@ -6,6 +6,22 @@ from torch.utils.data import DataLoader, Dataset
 from vqvae import VQVAE
 import time
 import os
+import sys
+
+# Simple command line arguments  
+dataset = 'indoor'  # Change to 'outdoor' for outdoor trials
+latent_dim = 1024   # Change this for different M values
+codebook_size = 512 # Change this for different K values
+
+# Override with command line if provided
+if len(sys.argv) > 1:
+    dataset = sys.argv[1]
+if len(sys.argv) > 2:
+    latent_dim = int(sys.argv[2])
+if len(sys.argv) > 3:
+    codebook_size = int(sys.argv[3])
+
+print(f"Training: Dataset={dataset}, M={latent_dim}, K={codebook_size}")
 
 # Lazy loading dataset implementation
 class LazyMATDataset(Dataset):
@@ -33,48 +49,41 @@ class LazyMATDataset(Dataset):
         return self.data_size
         
     def __getitem__(self, idx):
-        # Load only the specific portion of the .mat file needed
-        try:
-            # SciPy loadmat gives us the full array, so we extract just the sample we need
-            # This is not fully lazy, but we only load the file once per batch
-            # For true lazy loading, we'd need a streaming approach or HDF5 format
-            if not hasattr(self, 'data_cache'):
-                print(f"Loading data from {self.file_path}")
-                mat_data = scipy.io.loadmat(self.file_path)
-                self.data_cache = mat_data[self.key].astype('float32')
-            
-            # Get the specific sample
-            sample = self.data_cache[idx].copy()
-            
-            # Normalize and reshape as before
-            sample = sample - 0.5
-            sample = np.reshape(sample, (2, 32, 32))
-            
-            return sample
-            
-        except Exception as e:
-            print(f"Error loading sample {idx} from {self.file_path}: {e}")
-            raise
+        if not hasattr(self, 'data_cache'):
+            print(f"Loading data from {self.file_path}")
+            mat_data = scipy.io.loadmat(self.file_path)
+            self.data_cache = mat_data[self.key].astype('float32')
+        
+        # Get the specific sample
+        sample = self.data_cache[idx].copy()
+        
+        # Normalize and reshape as before
+        sample = sample - 0.5
+        sample = np.reshape(sample, (2, 32, 32))
+        
+        return torch.tensor(sample, dtype=torch.float32)
 
 # Set dataset sizes according to Junyong's paper
 train_size = 100000
 val_size = 30000
-test_size = 20000
 
-# For testing purposes TO BE FASTER!!!!
-use_full_dataset = True  # Set to True when using complete dataset
+# For testing purposes (set to False for full dataset)
+use_full_dataset = True
 if not use_full_dataset:
     train_size = 5000
     val_size = 1000
-    test_size = 1000
 
 # Set device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
-# Create datasets with lazy loading
-train_dataset = LazyMATDataset("data/DATA_Htrainin.mat")
-val_dataset = LazyMATDataset("data/DATA_Hvalin.mat")
+# Create datasets with lazy loading based on dataset argument
+if dataset == 'indoor':
+    train_dataset = LazyMATDataset("data/DATA_Htrainin.mat")
+    val_dataset = LazyMATDataset("data/DATA_Hvalin.mat")
+else:
+    train_dataset = LazyMATDataset("data/DATA_Htrainout.mat")
+    val_dataset = LazyMATDataset("data/DATA_Hvalout.mat")
 
 # If we need to use a subset of the data
 if len(train_dataset) > train_size:
@@ -85,29 +94,35 @@ if len(val_dataset) > val_size:
     val_indices = torch.randperm(len(val_dataset))[:val_size]
     val_dataset = torch.utils.data.Subset(val_dataset, val_indices)
 
-# Create DataLoaders
-batch_size = 256
+# Create DataLoaders with DeepMind batch size
+batch_size = 128  # DeepMind paper (changed from 256)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
-# Set up model (configure based on DeepMind's architecture)
-# Using parameters from Junyong's paper and Neural Discrete Representation Learning
+# Set up model with variable parameters
 model = VQVAE(input_dim=2,
               hidden_dim=256,  # DeepMind used 256 hidden units
-              num_embeddings=512,  # Codebook size
-              embedding_dim=64).to(device)
+              num_embeddings=codebook_size,  # Now variable
+              embedding_dim=latent_dim).to(device)  # Now variable
 
 # Optimizer with Adam as in DeepMind paper
-learning_rate = 2e-4  # Learning rate from DeepMind paper (2e-4)
+learning_rate = 2e-4  # Learning rate from DeepMind paper
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 criterion = torch.nn.MSELoss()
 
+# Create model directory for this configuration
+model_dir = f"models_{dataset}_M{latent_dim}_K{codebook_size}"
+os.makedirs(model_dir, exist_ok=True)
+
 # Open a log file
-log_filename = "training_log.txt"
+log_filename = f"{model_dir}/training_log.txt"
 with open(log_filename, "w") as log_file:
     log_file.write("VQ-VAE Training Log\n")
     log_file.write(f"Start Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
     log_file.write("=== Training Parameters ===\n")
+    log_file.write(f"Dataset: {dataset}\n")
+    log_file.write(f"Latent Dimension (M): {latent_dim}\n")
+    log_file.write(f"Codebook Size (K): {codebook_size}\n")
     log_file.write(f"Learning Rate: {learning_rate}\n")
     log_file.write(f"Batch Size: {batch_size}\n")
     log_file.write(f"Train Size: {train_size}\n")
@@ -115,6 +130,11 @@ with open(log_filename, "w") as log_file:
     log_file.write("=== Training Progress ===\n")
     log_file.write(f"{'Epoch':<10} {'Recon Loss':<15} {'VQ Loss':<15} {'Val Loss'}\n")
     log_file.write("="*50 + "\n")
+
+# Early stopping logic
+patience = 5
+min_delta = 1e-5
+epochs_no_improve = 0
 
 # Training loop
 num_epochs = 50 if use_full_dataset else 10
@@ -156,6 +176,10 @@ for epoch in range(num_epochs):
             reconstructed, _ = model(data)
             val_loss += criterion(reconstructed, data).item()
     
+    # Print CUDA memory usage after each epoch
+    if torch.cuda.is_available():
+        print(f"CUDA Memory Usage: {torch.cuda.memory_allocated(0)/1024**2:.2f} MB")
+    
     # Average losses
     avg_train_loss = total_loss / len(train_loader)
     avg_vq_loss = total_vq_loss / len(train_loader)
@@ -166,11 +190,18 @@ for epoch in range(num_epochs):
           f"VQ Loss: {avg_vq_loss:.4f}, "
           f"Val Loss: {avg_val_loss:.4f}")
     
-    # Save the best model
-    if avg_val_loss < best_val_loss:
+    # Early stopping logic
+    if avg_val_loss < best_val_loss - min_delta:
         best_val_loss = avg_val_loss
-        torch.save(model.state_dict(), "vqvae_model_best.pth")
+        epochs_no_improve = 0
+        torch.save(model.state_dict(), f"{model_dir}/model_best.pth")
         print("  Saved best model!")
+    else:
+        epochs_no_improve += 1
+    
+    if epochs_no_improve >= patience:
+        print(f"Early stopping triggered after {epoch+1} epochs.")
+        break
     
     # Append results to log file
     with open(log_filename, "a") as log_file:
@@ -184,10 +215,11 @@ for epoch in range(num_epochs):
             'optimizer_state_dict': optimizer.state_dict(),
             'train_loss': avg_train_loss,
             'val_loss': avg_val_loss,
-        }, f"vqvae_checkpoint_epoch_{epoch+1}.pth")
+        }, f"{model_dir}/checkpoint_epoch_{epoch+1}.pth")
 
 # Save the final model
-torch.save(model.state_dict(), "vqvae_model_final.pth")
+if epochs_no_improve < patience:
+    torch.save(model.state_dict(), f"{model_dir}/model_final.pth")
 
 # Append final message to log file
 with open(log_filename, "a") as log_file:
@@ -195,3 +227,6 @@ with open(log_filename, "a") as log_file:
     log_file.write("Training Complete!\n")
     log_file.write(f"Best Validation Loss: {best_val_loss:.4f}\n")
     log_file.write(f"End Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+print(f"Training complete! Models saved in {model_dir}/")
+print(f"Best validation loss: {best_val_loss:.4f}")
